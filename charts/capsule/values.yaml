@@ -10,7 +10,7 @@ manager:
   # Additional manager options
   options:
     logLevel: '4'
-    forceTenantPrefix: true
+    forceTenantPrefix:
     capsuleUserGroup:
     protectedNamespaceRegex:
     allowIngressHostnameCollision: false
