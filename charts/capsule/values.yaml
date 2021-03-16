@@ -62,7 +62,7 @@ capsule-proxy:
     tag: ""
   options:
     listeningPort: 9001
-    logLevel: '5'
+    logLevel: '4'
     k8sControlPlaneUrl: https://kubernetes.default.svc
     capsuleUserGroup: capsule.clastix.io
     oidcUsernameClaim: preferred_username
@@ -87,11 +87,11 @@ capsule-proxy:
     labels: {}
   ingress:
     enabled: false
-    annotations: {}
-    hosts:
-    - host: kube.clastix.io
-      paths: [ "/" ]
-    tls: []
+    # annotations: {}
+    # hosts:
+    # - host: kube.clastix.io
+    #   paths: [ "/" ]
+    # tls: []
   resources: 
     limits:
       cpu: 200m

@@ -25,7 +25,7 @@ version: 0.0.18
 
 # This is the version number of the application being deployed.
 # This version number should be incremented each time you make changes to the application.
-appVersion: 0.0.5-rc2
+appVersion: 0.0.5
 
 dependencies:
 - name: capsule-proxy
