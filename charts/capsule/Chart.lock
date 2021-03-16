@@ -1,0 +1,6 @@
+dependencies:
+- name: capsule-proxy
+  repository: https://clastix.github.io/charts
+  version: 0.1.1
+digest: sha256:2068fc1343bffb856ad788bc3ca53b11502613e49bf674f8976985927a40b2cb
+generated: "2021-03-16T09:08:03.558773+01:00"
