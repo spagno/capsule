@@ -287,14 +287,18 @@ func (r *TenantReconciler) syncAdditionalRoleBindings(tenant *capsulev1beta1.Ten
 	return nil
 }
 
-// We're relying on the ResourceQuota resource to represent the resource quota for the single Tenant rather than the
-// single Namespace, so abusing of this API although its Namespaced scope.
+// When the Resource Budget assigned to a Tenant is Tenant-scoped we have to rely on the ResourceQuota resources to
+// represent the resource quota for the single Tenant rather than the single Namespace,
+// so abusing of this API although its Namespaced scope.
+//
 // Since a Namespace could take-up all the available resource quota, the Namespace ResourceQuota will be a 1:1 mapping
 // to the Tenant one: in a second time Capsule is going to sum all the analogous ResourceQuota resources on other Tenant
 // namespaces to check if the Tenant quota has been exceeded or not, reusing the native Kubernetes policy putting the
 // .Status.Used value as the .Hard value.
 // This will trigger a following reconciliation but that's ok: the mutateFn will re-use the same business logic, letting
 // the mutateFn along with the CreateOrUpdate to don't perform the update since resources are identical.
+//
+// In case of Namespace-scoped Resource Budget, we're just replicating the resources across all registered Namespaces.
 func (r *TenantReconciler) syncResourceQuotas(tenant *capsulev1beta1.Tenant) error {
 	// getting requested ResourceQuota keys
 	keys := make([]string, 0, len(tenant.Spec.ResourceQuota.Items))
@@ -350,56 +354,58 @@ func (r *TenantReconciler) syncResourceQuotas(tenant *capsulev1beta1.Tenant) err
 					r.Log.Error(err, "Cannot list ResourceQuota", "tenantFilter", tr.String(), "indexFilter", ir.String())
 					return err
 				}
+				// Calculating the Resource Budget at Tenant scope just if this is put in place.
+				if tenant.Spec.ResourceQuota.Scope == capsulev1beta1.ResourceQuotaScopeTenant {
+					// Iterating over all the options declared for the ResourceQuota,
+					// summing all the used quota across different Namespaces to determinate
+					// if we're hitting a Hard quota at Tenant level.
+					// For this case, we're going to block the Quota setting the Hard as the
+					// used one.
+					for rn, rq := range q.Hard {
+						r.Log.Info("Desired hard " + rn.String() + " quota is " + rq.String())
 
-				// Iterating over all the options declared for the ResourceQuota,
-				// summing all the used quota across different Namespaces to determinate
-				// if we're hitting a Hard quota at Tenant level.
-				// For this case, we're going to block the Quota setting the Hard as the
-				// used one.
-				for rn, rq := range q.Hard {
-					r.Log.Info("Desired hard " + rn.String() + " quota is " + rq.String())
-
-					// Getting the whole usage across all the Tenant Namespaces
-					var qt resource.Quantity
-					for _, rq := range rql.Items {
-						qt.Add(rq.Status.Used[rn])
-					}
-					r.Log.Info("Computed " + rn.String() + " quota for the whole Tenant is " + qt.String())
-
-					switch qt.Cmp(q.Hard[rn]) {
-					case 0:
-						// The Tenant is matching exactly the Quota:
-						// falling through next case since we have to block further
-						// resource allocations.
-						fallthrough
-					case 1:
-						// The Tenant is OverQuota:
-						// updating all the related ResourceQuota with the current
-						// used Quota to block further creations.
-						for i := range rql.Items {
-							if _, ok := rql.Items[i].Status.Used[rn]; ok {
-								rql.Items[i].Spec.Hard[rn] = rql.Items[i].Status.Used[rn]
-							} else {
-								um := make(map[corev1.ResourceName]resource.Quantity)
-								um[rn] = resource.Quantity{}
-								rql.Items[i].Spec.Hard = um
-							}
+						// Getting the whole usage across all the Tenant Namespaces
+						var qt resource.Quantity
+						for _, rq := range rql.Items {
+							qt.Add(rq.Status.Used[rn])
 						}
-					default:
-						// The Tenant is respecting the Hard quota:
-						// restoring the default one for all the elements,
-						// also for the reconciled one.
-						for i := range rql.Items {
-							if rql.Items[i].Spec.Hard == nil {
-								rql.Items[i].Spec.Hard = map[corev1.ResourceName]resource.Quantity{}
+						r.Log.Info("Computed " + rn.String() + " quota for the whole Tenant is " + qt.String())
+
+						switch qt.Cmp(q.Hard[rn]) {
+						case 0:
+							// The Tenant is matching exactly the Quota:
+							// falling through next case since we have to block further
+							// resource allocations.
+							fallthrough
+						case 1:
+							// The Tenant is OverQuota:
+							// updating all the related ResourceQuota with the current
+							// used Quota to block further creations.
+							for i := range rql.Items {
+								if _, ok := rql.Items[i].Status.Used[rn]; ok {
+									rql.Items[i].Spec.Hard[rn] = rql.Items[i].Status.Used[rn]
+								} else {
+									um := make(map[corev1.ResourceName]resource.Quantity)
+									um[rn] = resource.Quantity{}
+									rql.Items[i].Spec.Hard = um
+								}
 							}
-							rql.Items[i].Spec.Hard[rn] = q.Hard[rn]
+						default:
+							// The Tenant is respecting the Hard quota:
+							// restoring the default one for all the elements,
+							// also for the reconciled one.
+							for i := range rql.Items {
+								if rql.Items[i].Spec.Hard == nil {
+									rql.Items[i].Spec.Hard = map[corev1.ResourceName]resource.Quantity{}
+								}
+								rql.Items[i].Spec.Hard[rn] = q.Hard[rn]
+							}
+							target.Spec = q
 						}
-						target.Spec = q
-					}
-					if err := r.resourceQuotasUpdate(rn, qt, q.Hard[rn], rql.Items...); err != nil {
-						r.Log.Error(err, "cannot proceed with outer ResourceQuota")
-						return err
+						if err := r.resourceQuotasUpdate(rn, qt, q.Hard[rn], rql.Items...); err != nil {
+							r.Log.Error(err, "cannot proceed with outer ResourceQuota")
+							return err
+						}
 					}
 				}
 				return controllerutil.SetControllerReference(tenant, target, r.Scheme)
